@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: lastlive/nuitka-patchelf
+      options: --user 0
 
     steps:
       - name: checkout

@@ -607,43 +607,64 @@ class Launcher:
             self.game_process.wait()
             logger.info("Game process stopped.")
             self.state = LauncherState.STARTGAME
+
+    def _build_proton_version_info(self, tool_dir):
+        proton_file_path = tool_dir / "proton"
+        if not proton_file_path.exists():
+            return None
+
+        timestamp_str = str(int(tool_dir.stat().st_mtime))
+        version = tool_dir.name
+        version_file_path = tool_dir / "version"
+
+        if version_file_path.exists():
+            try:
+                version_content = version_file_path.read_text(encoding='utf-8').strip()
+                parts = version_content.split()
+                if len(parts) >= 2 and parts[0].isdigit():
+                    timestamp_str = parts[0]
+                    version = ' '.join(parts[1:])
+                elif len(version_content) > 0:
+                    version = version_content
+            except Exception as e:
+                logger.warning(f"Failed to parse version file {version_file_path}: {e}")
+
+        return {
+            'proton_path': str(proton_file_path),
+            'timestamp': timestamp_str,
+            'version': version,
+        }
             
     def find_available_proton(self):
         # Find all available Proton versions
         geproton_versions = []
         geproton_dir_path = Path(os.path.expanduser("~")) / '.steam' / 'steam' / 'compatibilitytools.d'
-        for entry in os.listdir(geproton_dir_path):
-            if entry.startswith("GE-Proton"):
-                proton_file_path = geproton_dir_path / entry / "proton"
-                version_file_path = geproton_dir_path / entry / "version"
-                if proton_file_path.exists() and version_file_path.exists():
-                    with open(version_file_path, 'r') as f:
-                        version_content = f.read().strip()
-                        timestamp_str, version = version_content.split(' ')
-                    proton_version_dict = {'proton_path': str(proton_file_path), 'timestamp':timestamp_str, 'version':version}
-                    geproton_versions.append(proton_version_dict)
+        if geproton_dir_path.exists():
+            for entry in os.listdir(geproton_dir_path):
+                entry_lower = entry.lower()
+                if entry.startswith("GE-Proton") or "dwproton" in entry_lower:
+                    proton_version_dict = self._build_proton_version_info(geproton_dir_path / entry)
+                    if proton_version_dict:
+                        geproton_versions.append(proton_version_dict)
         geproton_versions.sort(key=lambda x: x['timestamp'], reverse=True)
         
         proton_versions = []
         proton_dir_path = Path(os.path.expanduser("~")) / '.steam' / 'steam' / 'steamapps' / 'common'
-        for entry in os.listdir(proton_dir_path):
-            if entry.startswith("Proton"):
-                proton_file_path = proton_dir_path / entry / "proton"
-                version_file_path = proton_dir_path / entry / "version"
-                if proton_file_path.exists() and version_file_path.exists():
-                    with open(version_file_path, 'r') as f:
-                        version_content = f.read().strip()
-                        timestamp_str, version = version_content.split(' ')
-                    proton_version_dict = {'proton_path':str(proton_file_path), 'timestamp':timestamp_str, 'version':version}
-                    proton_versions.append(proton_version_dict)
+        if proton_dir_path.exists():
+            for entry in os.listdir(proton_dir_path):
+                if entry.startswith("Proton"):
+                    proton_version_dict = self._build_proton_version_info(proton_dir_path / entry)
+                    if proton_version_dict:
+                        proton_versions.append(proton_version_dict)
         proton_versions.sort(key=lambda x: x['timestamp'], reverse=True)
         
         return geproton_versions, proton_versions
     
     def has_available_proton(self):
         geproton_versions, proton_versions = self.find_available_proton()
-        if len(geproton_versions) == 0 or len(proton_versions) == 0:
+        if len(geproton_versions) == 0 and len(proton_versions) == 0:
             return False
+        return True
         
     def get_latest_proton(self):
         geproton_versions, proton_versions = self.find_available_proton()

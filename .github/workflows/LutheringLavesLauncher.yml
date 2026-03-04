@@ -6,25 +6,21 @@ name: LutheringLavesLauncher Packing
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
 
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     container:
       image: lastlive/nuitka-patchelf
 
     steps:
       - name: checkout
         uses: actions/checkout@v4
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.head_ref }}
 
       - name: show dependencies
         run: |
@@ -39,26 +35,27 @@ jobs:
 
       - name: Get current time
         id: current-time
-        run: echo "timestamp=$(date +'%Y%m%d_%H%M%S')" >> $GITHUB_ENV
+        run: |
+          echo "timestamp=$(date -u +'%Y%m%d_%H%M%S')" >> $GITHUB_OUTPUT
+          echo "tag_name=launcher-${GITHUB_RUN_NUMBER}-$(date -u +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
 
       - name: Compress LutheringLavesLauncher.dist
         run: |
           mv LutheringLavesLauncher.dist LutheringLavesLauncher
-          zip -r "LutheringLavesLauncher_${{ env.timestamp }}.zip" LutheringLavesLauncher/
+          zip -r "LutheringLavesLauncher_${{ steps.current-time.outputs.timestamp }}.zip" LutheringLavesLauncher/
 
-      - name: Upload zip to WebDAV
-        uses: XPH0816/webdav-deploy-action@v0.3
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          url: ${{ secrets.WEB_DAV_URL }}
-          username: ${{ secrets.WEB_DAV_USERNAME }}
-          password: ${{ secrets.WEB_DAV_PASSWORD }}
-          local: "LutheringLavesLauncher_${{ env.timestamp }}.zip"
-          remote: "space2/LLL-release/"
-          method: "copy"
+          tag_name: ${{ steps.current-time.outputs.tag_name }}
+          name: LutheringLavesLauncher ${{ steps.current-time.outputs.timestamp }}
+          generate_release_notes: true
+          files: |
+            LutheringLavesLauncher_${{ steps.current-time.outputs.timestamp }}.zip
 
       - name: Clean up
         run: |
-          rm "LutheringLavesLauncher_${{ env.timestamp }}.zip"
+          rm "LutheringLavesLauncher_${{ steps.current-time.outputs.timestamp }}.zip"
           rm -rf LutheringLavesLauncher/
           rm -rf LutheringLavesLauncher.dist/
           rm -rf LutheringLavesLauncher.build/

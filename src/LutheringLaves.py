@@ -551,6 +551,9 @@ class Launcher:
             
             game_exe_path =  Path(base_dir) / "Wuthering Waves Game" / "Wuthering Waves.exe"
             steam_dir_path = Path(os.path.expanduser("~")) / '.steam' / 'steam'
+            steam_root_path = Path(os.path.expanduser("~")) / '.local' / 'share' / 'Steam'
+            steam_ubuntu32_path = steam_root_path / 'ubuntu12_32'
+            steam_runtime_entry = steam_root_path / 'steamapps' / 'common' / 'SteamLinuxRuntime_sniper' / '_v2-entry-point'
             proton_path = self.settings.get('proton_path', '')
             
             steamAppid = self.settings.get('steamappid', '0')
@@ -561,43 +564,77 @@ class Launcher:
             if not compatdata_path.exists():
                 compatdata_path.mkdir(parents=True, exist_ok=True)
             compatdata_path = compatdata_path.resolve()
-            
-            os.environ["STEAM_COMPAT_DATA_PATH"] = str(compatdata_path)
-            os.environ["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = str(steam_dir_path)
-            os.environ["STEAM_PROTON_PATH"] = str(proton_path)
-            os.environ["WINEPREFIX"] = str(wine_prefix)
-            
-            if steamAppid != '0':
-                os.environ["STEAMAPPID"] = steamAppid
+
+            launch_env = os.environ.copy()
+            launch_env["STEAM_COMPAT_DATA_PATH"] = str(compatdata_path)
+            launch_env["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = str(steam_dir_path)
+            launch_env["STEAM_PROTON_PATH"] = str(proton_path)
+            launch_env["WINEPREFIX"] = str(wine_prefix)
+
+            if not steamAppid or steamAppid == '0':
+                logger.error("steamappid is not set. Steam Runtime mode requires a valid steam app id.")
+                return
+
+            launch_env["STEAMAPPID"] = steamAppid
+            launch_env["SteamAppId"] = steamAppid
+            launch_env["SteamGameId"] = steamAppid
+            launch_env["STEAM_COMPAT_APP_ID"] = steamAppid
             if self.settings.get('proton_media_use_gst', '0') == '1':
-                os.environ["PROTON_MEDIA_USE_GST"] = "1"
+                launch_env["PROTON_MEDIA_USE_GST"] = "1"
             if self.settings.get('proton_enable_wayland', '0') == '1':
-                os.environ["PROTON_ENABLE_WAYLAND"] = "1"
+                launch_env["PROTON_ENABLE_WAYLAND"] = "1"
             if self.settings.get('proton_no_d3d12', '0') == '1':
-                os.environ["PROTON_NO_D3D12"] = "1"
+                launch_env["PROTON_NO_D3D12"] = "1"
             if self.settings.get('mangohud', '0') == '1':
-                os.environ["MANGOHUD"] = "1"
+                launch_env["MANGOHUD"] = "1"
             
-            os.environ["STEAMDECK"] = "1"
+            launch_env["STEAMDECK"] = "1"
+
+            ld_preload = launch_env.get("LD_PRELOAD", "")
+            if ld_preload:
+                preload_items = [item for item in ld_preload.split(':') if item]
+                filtered_items = [item for item in preload_items if "gameoverlayrenderer.so" not in item]
+                if len(filtered_items) != len(preload_items):
+                    if filtered_items:
+                        launch_env["LD_PRELOAD"] = ':'.join(filtered_items)
+                    else:
+                        launch_env.pop("LD_PRELOAD", None)
+                    logger.info("Removed Steam overlay entries from LD_PRELOAD for Steam Runtime launch")
             
             logger.info(f"compatdata_path: {compatdata_path}")
-            # steam_launch_command = f"SteamDeck=1 /home/deck/.local/share/Steam/ubuntu12_32/steam-launch-wrapper \
-            #     -- /home/deck/.local/share/Steam/ubuntu12_32/reaper \
-            #     SteamLaunch AppId={AppId} \
-            #     -- /home/deck/.local/share/Steam/steamapps/common/SteamLinuxRuntime_sniper/_v2-entry-point \
-            #     --verb=waitforexitandrun \
-            #     -- {proton_path} \
-            #     waitforexitandrun \
-            #     {game_exe}"
             try:
+                if not proton_path or not Path(proton_path).exists():
+                    raise FileNotFoundError(f"Invalid proton path: {proton_path}")
+                if not game_exe_path.exists():
+                    raise FileNotFoundError(f"Game executable not found: {game_exe_path}")
+
+                steam_launch_wrapper = steam_ubuntu32_path / 'steam-launch-wrapper'
+                steam_reaper = steam_ubuntu32_path / 'reaper'
+
+                if not steam_launch_wrapper.exists():
+                    raise FileNotFoundError(f"steam-launch-wrapper not found: {steam_launch_wrapper}")
+                if not steam_reaper.exists():
+                    raise FileNotFoundError(f"reaper not found: {steam_reaper}")
+                if not steam_runtime_entry.exists():
+                    raise FileNotFoundError(f"Steam Runtime entry not found: {steam_runtime_entry}")
+
                 self.game_process = subprocess.Popen([
-                    proton_path,
-                    "waitforexitandrun",
-                    game_exe_path
-                ])
-                logger.info(f"Launched game with Proton: {proton_path} run {game_exe_path}")
+                    str(steam_launch_wrapper),
+                    "--",
+                    str(steam_reaper),
+                    "SteamLaunch",
+                    f"AppId={steamAppid}",
+                    "--",
+                    str(steam_runtime_entry),
+                    "--verb=run",
+                    "--",
+                    str(proton_path),
+                    "run",
+                    str(game_exe_path)
+                ], cwd=str(game_exe_path.parent), env=launch_env)
+                logger.info("Launched game with Steam Runtime + Proton")
             except Exception as e:
-                logger.error(f"Failed to launch game with Proton: {e}")
+                logger.error(f"Failed to launch game with Steam Runtime: {e}")
                 
     def stop_game_process(self):
         if hasattr(self, 'game_process') and self.game_process:
